@@ -1,7 +1,15 @@
 import { Network, Alchemy } from "alchemy-sdk";
 import { formatGwei } from "viem";
-import { createObjectCsvWriter } from "csv-writer";
+import { createObjectCsvWriter, createObjectCsvStringifier } from "csv-writer";
+import csv from "csv-parser";
+import fs from "fs";
 import "dotenv/config";
+
+type GasPriceRecord = {
+  date: string;
+  network: string;
+  gasPrice: string;
+};
 
 const NETWORKS_TO_TRACK = [
   Network.OPT_MAINNET,
@@ -19,9 +27,36 @@ const HEADERS = [
 ];
 
 const CURRENT_DATE = new Date().toISOString().split("T")[0];
-// const YESTERDAY_DATE = new Date(Date.now() - 86400000)
-//   .toISOString()
-//   .split("T")[0];
+
+const readCsv = (filePath: string) => {
+  return new Promise((resolve, _) => {
+    const results: any[] = [];
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on("data", (data) => results.push(data))
+      .on("end", () => {
+        resolve(results);
+      });
+  });
+};
+
+const writeCsv = async (filePath: string, records: any) => {
+  const csvWriter = createObjectCsvWriter({
+    path: filePath,
+    header: HEADERS,
+  });
+
+  await csvWriter.writeRecords(records);
+};
+
+const appendCsv = async (filePath: string, record: any) => {
+  const csvStringifier = createObjectCsvStringifier({
+    header: HEADERS,
+  });
+
+  const csvLine = csvStringifier.stringifyRecords([record]);
+  fs.appendFileSync(filePath, csvLine);
+};
 
 const getRedstoneGasPrice = async () => {
   console.log(`Fetching gas price for redstone...`);
@@ -41,11 +76,7 @@ const getRedstoneGasPrice = async () => {
 
     const { result } = await response.json();
 
-    return {
-      date: CURRENT_DATE,
-      network: "redstone",
-      gasPrice: formatGwei(BigInt(result)),
-    };
+    return formatGwei(BigInt(result));
   } catch (error) {
     console.error(`Failed to fetch gas price for redstone`);
     return null;
@@ -70,26 +101,67 @@ const getGasPrice = async (network: Network) => {
   }
 };
 
-const outputGasPrice = async (network: Network) => {
+const outputGasPrice = async (network: Network | "redstone") => {
   try {
-    const gasPrice = await getGasPrice(network);
+    let gasPriceRecord: GasPriceRecord | null = null;
 
-    if (!gasPrice) {
+    if (network === "redstone") {
+      const redstoneGasPrice = await getRedstoneGasPrice();
+
+      if (!redstoneGasPrice) {
+        return;
+      }
+
+      gasPriceRecord = {
+        date: CURRENT_DATE,
+        network,
+        gasPrice: redstoneGasPrice,
+      };
+    } else {
+      const gasPrice = await getGasPrice(network);
+
+      if (!gasPrice) {
+        return;
+      }
+
+      gasPriceRecord = {
+        date: CURRENT_DATE,
+        network,
+        gasPrice,
+      };
+    }
+
+    if (!gasPriceRecord) {
       return;
     }
 
-    const record = {
-      date: CURRENT_DATE,
-      network,
-      gasPrice,
-    };
+    const filePath = `data/${network}_gasPrices.csv`;
 
-    const csvWriter = createObjectCsvWriter({
-      path: `data/${network}_gasPrices.csv`, // e.g. `opt_mainnet_gasPrices.csv
-      header: HEADERS,
-    });
+    if (fs.existsSync(filePath)) {
+      await readCsv(filePath).then((records: any) => {
+        const mappedRecords = records.map((record: any) => {
+          return {
+            date: record["Date"],
+            network: record["Network"],
+            gasPrice: record["Gas Price (Gwei)"],
+          };
+        });
 
-    await csvWriter.writeRecords([record]);
+        if (
+          mappedRecords.length > 0 &&
+          mappedRecords[mappedRecords.length - 1].date === CURRENT_DATE
+        ) {
+          // Overwrite the last entry
+          mappedRecords[mappedRecords.length - 1] = gasPriceRecord;
+          return writeCsv(filePath, mappedRecords);
+        } else {
+          // Append a new entry
+          return appendCsv(filePath, gasPriceRecord);
+        }
+      });
+    } else {
+      return writeCsv(filePath, [gasPriceRecord]);
+    }
   } catch (error) {
     console.log(error);
     console.error(`Failed to fetch gas price for ${network}`);
@@ -99,21 +171,7 @@ const outputGasPrice = async (network: Network) => {
 const outputGasPrices = async () => {
   console.log("Fetching gas prices...");
   await Promise.all(
-    NETWORKS_TO_TRACK.map(async (network) => {
-      if (network === "redstone") {
-        const redstoneGasPrice = await getRedstoneGasPrice();
-        if (!redstoneGasPrice) {
-          return;
-        }
-        const csvWriter = createObjectCsvWriter({
-          path: "data/redstone_gasPrices.csv",
-          header: HEADERS,
-        });
-        await csvWriter.writeRecords([redstoneGasPrice]);
-        return;
-      }
-      return outputGasPrice(network as Network);
-    })
+    NETWORKS_TO_TRACK.map(async (network) => outputGasPrice(network as Network))
   );
 
   console.log("Gas Prices written to CSV files");
