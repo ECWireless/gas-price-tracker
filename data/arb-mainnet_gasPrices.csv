@@ -1,3 +1,2 @@
-Date,Network,Gas Price (Gwei)
-2024-06-06,arb-mainnet,0.01
-2024-06-07,arb-mainnet,0.01
+Date,Network,Gas Price (Gwei),ETH Price (USD)
+2024-06-07,arb-mainnet,0.01,3810.7

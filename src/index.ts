@@ -3,12 +3,14 @@ import { formatGwei } from "viem";
 import { createObjectCsvWriter, createObjectCsvStringifier } from "csv-writer";
 import csv from "csv-parser";
 import fs from "fs";
+import axios from "axios";
 import "dotenv/config";
 
 type GasPriceRecord = {
   date: string;
   network: string;
   gasPrice: string;
+  ethPrice: string;
 };
 
 const NETWORKS_TO_TRACK = [
@@ -24,9 +26,24 @@ const HEADERS = [
   { id: "date", title: "Date" },
   { id: "network", title: "Network" },
   { id: "gasPrice", title: "Gas Price (Gwei)" },
+  { id: "ethPrice", title: "ETH Price (USD)" },
 ];
 
 const CURRENT_DATE = new Date().toISOString().split("T")[0];
+
+const getEthPrice = async () => {
+  try {
+    const response = await axios.get(
+      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+    );
+    const ethPrice = response.data.ethereum.usd;
+    console.log(`The current price of ETH is $${ethPrice}`);
+    return ethPrice as string;
+  } catch (error) {
+    console.error("Error fetching ETH price:", error);
+    return null;
+  }
+};
 
 const readCsv = (filePath: string) => {
   return new Promise((resolve, _) => {
@@ -101,7 +118,10 @@ const getGasPrice = async (network: Network) => {
   }
 };
 
-const outputGasPrice = async (network: Network | "redstone") => {
+const outputGasPrice = async (
+  network: Network | "redstone",
+  ethPrice: string
+) => {
   try {
     let gasPriceRecord: GasPriceRecord | null = null;
 
@@ -116,6 +136,7 @@ const outputGasPrice = async (network: Network | "redstone") => {
         date: CURRENT_DATE,
         network,
         gasPrice: redstoneGasPrice,
+        ethPrice,
       };
     } else {
       const gasPrice = await getGasPrice(network);
@@ -128,6 +149,7 @@ const outputGasPrice = async (network: Network | "redstone") => {
         date: CURRENT_DATE,
         network,
         gasPrice,
+        ethPrice,
       };
     }
 
@@ -144,6 +166,7 @@ const outputGasPrice = async (network: Network | "redstone") => {
             date: record["Date"],
             network: record["Network"],
             gasPrice: record["Gas Price (Gwei)"],
+            ethPrice: record["ETH Price (USD)"],
           };
         });
 
@@ -170,8 +193,13 @@ const outputGasPrice = async (network: Network | "redstone") => {
 
 const outputGasPrices = async () => {
   console.log("Fetching gas prices...");
+  const currentEthPrice = await getEthPrice();
+  if (!currentEthPrice) return;
+
   await Promise.all(
-    NETWORKS_TO_TRACK.map(async (network) => outputGasPrice(network as Network))
+    NETWORKS_TO_TRACK.map(async (network) =>
+      outputGasPrice(network as Network, currentEthPrice)
+    )
   );
 
   console.log("Gas Prices written to CSV files");
