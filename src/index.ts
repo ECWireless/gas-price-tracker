@@ -16,7 +16,9 @@ type GasPriceRecord = {
 const NETWORKS_TO_TRACK = [
   Network.OPT_MAINNET,
   Network.BASE_MAINNET,
+  Network.BASE_SEPOLIA,
   Network.ARB_MAINNET,
+  Network.POLYGONZKEVM_MAINNET,
   "redstone",
 ];
 
